@@ -12,7 +12,7 @@ class MyPromise {
 
         this.callbackList.forEach((callback) => {
           try {
-            this.value = callback(this.value);
+            callback(this.value);
           } catch (error) {
             reject(error);
           }
@@ -27,7 +27,7 @@ class MyPromise {
 
         this.catchFuncList.forEach((catchFunc) => {
           try {
-            this.value = catchFunc(this.value);
+            catchFunc(this.value);
           } catch (error) {
             reject(error);
           }
@@ -44,28 +44,43 @@ class MyPromise {
 
   then(thenExecutor) {
     return new MyPromise((resolve, reject) => {
-      if (this.status === "fulfilled") {
+      const handleCallback = () => {
         try {
-          resolve(thenExecutor(this.value));
-        } catch (error) {
-          reject(error);
+          const result = thenExecutor(this.value);
+
+          if (result && typeof result.then === "function") {
+            result.then(resolve).catch(reject);
+          } else {
+            resolve(result);
+          }
+        } catch (e) {
+          reject(e);
         }
+      };
+
+      if (this.status === "fulfilled") {
+        handleCallback();
       } else if (this.status === "pending") {
-        this.callbackList.push(thenExecutor);
+        this.callbackList.push(handleCallback);
       }
     });
   }
 
   catch(catchExecutor) {
     return new MyPromise((resolve, reject) => {
-      if (this.status === "rejected") {
+      const handleCatch = () => {
         try {
-          resolve(catchExecutor(this.value));
+          const result = catchExecutor(this.value);
+          resolve(result);
         } catch (error) {
           reject(error);
         }
+      };
+
+      if (this.status === "rejected") {
+        handleCatch();
       } else if (this.status === "pending") {
-        this.catchFuncList.push(catchExecutor);
+        this.catchFuncList.push(handleCatch);
       }
     });
   }
@@ -85,5 +100,9 @@ const promise = new MyPromise((resolve, reject) => {
 });
 
 promise
-  .then((value) => console.log(`${value} and bar`))
-  .catch((err) => console.log(`Error: ${err}`));
+  .then((value) => {
+    console.log(`${value} and bar`);
+    return `${value} and bar`;
+  })
+  .then((value) => console.log(`${value} and bar again`));
+// .catch((err) => console.log(`Error: ${err}`));
