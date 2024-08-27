@@ -87,16 +87,16 @@ class MyPromise {
 }
 
 const promise = new MyPromise((resolve, reject) => {
-  setTimeout(() => {
-    const randomNumber = Math.random() * 10;
-    console.log("randomNumber", randomNumber);
+  // setTimeout(() => {
+  const randomNumber = Math.random() * 10;
+  console.log("randomNumber", randomNumber);
 
-    if (randomNumber > 5) {
-      resolve("foo");
-    } else {
-      reject("Error");
-    }
-  }, 300);
+  if (randomNumber > 5) {
+    resolve("foo");
+  } else {
+    reject("Error");
+  }
+  // }, 300);
 });
 
 promise
@@ -104,5 +104,5 @@ promise
     console.log(`${value} and bar`);
     return `${value} and bar`;
   })
+  .catch((err) => console.log(`Error: ${err}`))
   .then((value) => console.log(`${value} and bar again`));
-// .catch((err) => console.log(`Error: ${err}`));
