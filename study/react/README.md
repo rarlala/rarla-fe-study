@@ -307,3 +307,151 @@ const element = (
 ```
 
 위와 같은 주석을 사용하면 babel이 JSX를 transpile할 때 우리가 정의한 함수를 사용할 것이다.
+
+## STEP 2
+
+### The render Function
+
+렌더링 기능 다음으로 ReactDOM.render 함수 버전을 작성해한다.
+업데이트 및 삭제는 나중에 처리하기로 하고, DOM에 항목을 추가하는 것만 해보자.
+
+```javascript
+function render(element, container) {
+  // TODO create dom nodes
+}
+
+const Didact = {
+  createElement,
+  render,
+};
+
+/** @jsx Didact.createElement */
+const element = (
+  <div id="foo">
+    <a>bar</a>
+    <b />
+  </div>
+);
+
+const container = document.getElementById("root");
+Didact.render(element, container);
+```
+
+```javascript
+function render(element, container) {
+  const dom = document.createElement(element.type);
+
+  container.appendChild(dom);
+}
+```
+
+element type을 사용해 DOM 노드를 생성한 다음 생성한 노드를 컨테이너에 추가한다.
+
+우리는 각 자식에 대해서도 동일한 작업을 반복적으로 수행한다.
+
+```javascript
+function render(element, container) {
+  const dom = document.createElement(element.type);
+
+  element.props.children.forEach((child) => render(child, dom));
+
+  container.appendChild(dom);
+}
+```
+
+또한 text elements를 처리해야한다. element type이 TEXT_ELEMENT인 경우 일반 노드 대신 text 노드를 생성한다.
+
+```javascript
+function render(element, container) {
+  const dom =
+    element.type == "TEXT_ELEMENT"
+      ? document.createTextNode("")
+      : document.createElement(element.type);
+
+  element.props.children.forEach((child) => render(child, dom));
+
+  container.appendChild(dom);
+}
+```
+
+여기서 마지막으로 해야 할 일은 element props를 node에 할당하는 것이다.
+
+```javascript
+function render(element, container) {
+  const dom =
+    element.type == "TEXT_ELEMENT"
+      ? document.createTextNode("")
+      : document.createElement(element.type);
+
+  const isProperty = (key) => key !== "children";
+  Object.keys(element.props)
+    .filter(isProperty)
+    .forEach((name) => {
+      dom[name] = element.props[name];
+    });
+
+  element.props.children.forEach((child) => render(child, dom));
+
+  container.appendChild(dom);
+}
+```
+
+이렇게 하면 JSX를 DOM으로 렌더링 할 수 있는 라이브러리가 생성된다.
+
+```javascript
+function createElement(type, props, ...children) {
+  return {
+    type,
+    props: {
+      ...props,
+      children: children.map((child) =>
+        typeof child === "object" ? child : createTextElement(child)
+      ),
+    },
+  };
+}
+
+function createTextElement(text) {
+  return {
+    type: "TEXT_ELEMENT",
+    props: {
+      nodeValue: text,
+      children: [],
+    },
+  };
+}
+
+function render(element, container) {
+  const dom =
+    element.type == "TEXT_ELEMENT"
+      ? document.createTextNode("")
+      : document.createElement(element.type);
+
+  const isProperty = (key) => key !== "children";
+  Object.keys(element.props)
+    .filter(isProperty)
+    .forEach((name) => {
+      dom[name] = element.props[name];
+    });
+
+  element.props.children.forEach((child) => render(child, dom));
+
+  container.appendChild(dom);
+}
+
+const Didact = {
+  createElement,
+  render,
+};
+
+/** @jsx Didact.createElement */
+const element = (
+  <div id="foo">
+    <a>bar</a>
+    <b />
+  </div>
+);
+
+const container = document.getElementById("root");
+Didact.render(element, container);
+```
