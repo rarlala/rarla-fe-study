@@ -32,7 +32,7 @@ function createDom(fiber) {
     .forEach((name) => {
       dom[name] = element.props[name];
     });
-
+  
   return dom;
 }
 
