@@ -499,3 +499,172 @@ requestIdleCallback을 setTimeout으로 생각할 수 있지만 실행 시기를
 requestIdleCallback은 deadline 매개변수도 제공한다. 이를 사용해 브라우저가 다시 제어애야 할 때까지 남은 시간을 확인 할 수 있다.
 
 loop 사용을 시작하려면 첫번째 작업 단위를 설정한 다음 작업을 수행할 뿐만 아니라 다음 작업 단위를 반환하는 PerformUnitOfWork 함수를 작성해야한다.
+
+## STEP 4
+
+### Fibers
+
+작업 단위를 구성하려면 fiber tree라는 데이터 구조가 필요하다.
+각 element마다 하나의 fiber가 있고 각 fiber는 작업 단위가 된다.
+
+![fiber](https://pomb.us/static/c1105e4f7fc7292d91c78caee258d20d/d3fa7/fiber2.png)
+
+```javascript
+Didact.render(
+  <div>
+    <h1>
+      <p />
+      <a />
+    </h1>
+    <h2 />
+  </div>,
+  container
+);
+```
+
+위 코드를 element tree로 렌더링한다고 가정해보겠다.
+
+렌더링에서 root fiber를 생성하고 nextUnitOfWork로 설정한다.
+나머지 작업은 PerformUnitOfWork 함수에서 수행되며 각 fiber에 대해 세가지 작업을 수행한다.
+
+1. element를 DOM에 추가한다.
+2. element의 children에 대한 fiber를 생성
+3. 다음 작업 단위를 선택
+
+fiber tree 구조의 목표 중 하나는 **다음 작업 단위를 쉽게 찾을 수 있도록 하는 것**이다. 이것이 바로 각 Fiber가 첫 번째 자식, 다음 형제 및 부모에 대한 링크를 갖는 이유다.
+
+Fiber에 대한 작업 수행이 끝나면, 해당 Fiber가 다음 작업 단위가 된다.
+예를 들면 위 코드에서 div 파이버 작업을 마치면 다음 작업 단위는 h1 파이버가 된다.
+
+만약 fiber가 child를 가지지 않는다면 다음 작업으로 sibling이 사용된다.
+그리고 fiber가 자식이나 형제자매가 없으면 부모의 형제자매인 삼촌으로 이동한다.
+위 예로 비유하면 a -> h2로의 이동이 해당된다.
+
+위 작업들은 루트에 도달할 때까지 부모를 통해 계속 올라간다.
+루트에 도달했다면 렌더링에 대한 모든 작업 수행을 완료했음을 의미한다.
+
+<details>
+<summary>여기서 잠깐, Fiber란?</summary>
+
+- React에서 각 UI요소를 나타내는 데이터 구조다. 이는 Virtual DOM에서 각 요소를 더 세밀하게 관리하고 업데이트하기 위한 기반을 제공한다.
+- Fiber는 작업 단위라고 할 수 있다. React의 업데이트는 Fiber 트리의 작업을 통해 이루어지며, 각 Fiber는 해당 UI 요소에 대한 정보를 담고 있다.
+
+Fiber 아키텍처의 핵심 요소
+
+- Fiber Node
+  - 각 Fiber는 React 컴포넌트나 DOM 요소를 나타내는 데이터 구조다
+  - Fiber 객체는 컴포넌트의 상태, 프로퍼티, 자식, 부모 등의 정보를 포함한다.
+- Fiber Tree
+  - Fiber는 Tree 구조로 연결되어있다. 각 Fiber는 부모 Fiber와 자식 Fiber를 가지며 전체 UI 구조를 나타내는 트리를 형성한다.
+- 작업의 우선 순위
+  - Fiber는 우선 순위에 따라 작업을 나누어 처리한다. 높은 우선순위를 가진 작업은 먼저 수행되고, 낮은 우선순위 작업은 나중에 수행된다.
+  - 작업은 slice 형태로 나눠져 수행되며, 이로 인해 UI 업데이트를 더 부드럽고 동적으로 처리할 수 있다.
+- 비동기 작업 처리
+  - Fiber는 비동기적으로 작업을 처리할 수 있도록 설계되어있다. 이는 긴 작업을 여러 프레임에 걸쳐 나누어 처리할 수 있게 해준다.
+
+다음 작업 단위의 의미
+Fiber가 작업을 처리한 후 다음 작업을 수행할 준비가 된다는 것을 의미
+Fiber가 계속해서 UI 업데이트를 처리하고 관리하는데 있어 다음 단계로 진행될 수 있음을 의미한다.
+
+</details>
+
+DOM 노드를 생성하는 부분을 함수에 보관하고 나중에 사용할 예정이다.
+우선, render로 적었던 함수를 createDom으로 함수명을 변경한다.
+
+```javascript
+function createDom(fiber) {
+  const dom =
+    element.type == "TEXT_ELEMENT"
+      ? document.createTextNode("")
+      : document.createElement(element.type);
+
+  const isProperty = (key) => key !== "children";
+  Object.keys(element.props)
+    .filter(isProperty)
+    .forEach((name) => {
+      dom[name] = element.props[name];
+    });
+
+  return dom;
+}
+```
+
+render 함수는 nextUnitOfWork를 Fiber tree의 root로 설정한다.
+
+```javascript
+function render(element, container) {
+  nextUntilOfWork = {
+    dom: container,
+    props: {
+      children: [element],
+    },
+  };
+}
+```
+
+그 다음 브라우저가 준비되면 workLoop를 호출하고 root에서 작업을 시작한다.
+
+```javascript
+
+```
+
+먼저 새 노드를 생성하고 이를 DOM 노드에 추가한다.
+우리는 Fiber.dom 속성에서 DOM 노드를 추적한다.
+
+그 다음 각 children마다 새로운 fiber를 만든다.
+
+그리고 첫 번째 child인지 아닌지에 따라 child 또는 sibling으로 설정해 fiber 트리에 추가한다.
+
+마지막으로 다음 작업 단위를 검색한다.
+먼저 child를 시도하고, 다음에는 sibling, 다음에는 uncle과 시도한다.
+
+```javascript
+function performUnitOfWork(fiber) {
+  // TODO add dom node
+  if (!fiber.dom) {
+    fiber.dom = createDom(fiber);
+  }
+
+  if (fiber.parent) {
+    fiber.parent.dom.appendChild(fiber.dom);
+  }
+  // TODO create new fibers
+  const elements = fiber.props.children;
+  let index = 0;
+  let prevSibling = null;
+
+  while (index < elements.length) {
+    const element = elements[index];
+
+    const newFiber = {
+      type: element.type,
+      props: element.props,
+      parent: fiber,
+      dom: null,
+    };
+
+    if (index === 0) {
+      fiber.child = newFiber;
+    } else {
+      prevSibling.sibling = newFiber;
+    }
+
+    prevSibling = newFiber;
+    index++;
+  }
+
+  // TODO return next unit of work
+  if (fiber.child) {
+    return fiber.child;
+  }
+  let nextFiber = fiber;
+  while (nextFiber) {
+    if (nextFiber.sibling) {
+      return nextFiber.sibling;
+    }
+    nextFiber = nextFiber.parent;
+  }
+}
+```
+
+이렇게 우리의 performUnitOfWork가 만들어졌다.
