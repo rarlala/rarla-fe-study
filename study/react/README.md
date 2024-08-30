@@ -455,3 +455,47 @@ const element = (
 const container = document.getElementById("root");
 Didact.render(element, container);
 ```
+
+## STEP 3
+
+### Concurrent Mode
+
+우선, 이어서 코드를 더 추가하기 전에 코드 리팩터링이 필요하다.
+
+```javascript
+element.props.children.forEach((child) => render(child, dom));
+```
+
+위 재귀 호출 코드에 문제가 있다.
+
+렌더링을 시작하면 완벽한 엘리먼트 트리를 렌더링할 때까지 멈추지 않는다. 엘리먼트 트리가 크면 메인 스레드를 오랫동안 차단할 수 있다. 그러면 브라우저가 사용자 입력을 처리하거나 애니메이션을 매끄럽게 유지하는 것과 같이 우선순위가 높은 작업을 해야하는 경우에도 렌더링이 완료될 때까지 기다려야한다.
+
+그래서 우리는 작업을 작은 단위로 나누고 각 단위를 마친 후에 수행해야 할 다른 작업이 있으면 브라우저가 렌더링을 중단하도록 할 것이다.
+
+```javascript
+let nextUntilOfWork = null;
+
+function workLoop(deadline) {
+  let shouldYield = false;
+  while (nextUntilOfWork && !shouldYield) {
+    nextUntilOfWork = performUnitOfWork(nextUnitOfWork);
+    shouldYield = deadline.timeRemaining() < 1;
+  }
+  requestIdleCallback(workLoop);
+}
+
+requestIdleCallback(workLoop);
+
+function performUnitOfWork(nextUnitOfWork) {
+  // TODO
+}
+```
+
+우리는 requestIdleCallback을 사용해 loop를 만들 것이다.
+requestIdleCallback을 setTimeout으로 생각할 수 있지만 실행 시기를 알려주는 대신 브라우저는 기본 스레드가 유휴 상태일 때 콜백을 실행한다.
+
++. React는 더 이상 requestIdleCallback을 사용하지 않고, [scheduler package](https://github.com/facebook/react/tree/main/packages/scheduler)를 사용한다. 하지만 이 예시에서는 개념적으론 동일하다.
+
+requestIdleCallback은 deadline 매개변수도 제공한다. 이를 사용해 브라우저가 다시 제어애야 할 때까지 남은 시간을 확인 할 수 있다.
+
+loop 사용을 시작하려면 첫번째 작업 단위를 설정한 다음 작업을 수행할 뿐만 아니라 다음 작업 단위를 반환하는 PerformUnitOfWork 함수를 작성해야한다.
