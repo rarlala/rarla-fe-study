@@ -668,3 +668,78 @@ function performUnitOfWork(fiber) {
 ```
 
 이렇게 우리의 performUnitOfWork가 만들어졌다.
+
+## STEP 5
+
+### Render and commit Phases
+
+또 문제가 되는 코드가 있다.
+
+```javascript
+if (fiber.parent) {
+  fiber.parent.dom.appendChild(fiber.dom);
+}
+```
+
+element에 대해 작업할 때마다 DOM에 새 노드를 추가하고 있다.
+전체 트리 렌더링을 완료하기 전에 브라우저가 작업을 중단할 수 있는데, 이 경우 사용자에게는 불완전한 UI가 표시되는데 우리는 이를 원치 않는다.
+
+따라서 DOM을 변경하는 저 부분을 제거하고,
+대신 fiber tree의 root를 추적할 것이다.
+이를 작업 진행 루트 또는 wipRoot라고 부른다.
+
+```javascript
+function render(element, container) {
+  wipRoot = {
+    dom: container,
+    props: {
+      children: [element],
+    },
+  };
+  nextUntilOfWork = wipRoot;
+}
+
+let nextUntilOfWork = null;
+let wipRoot = null;
+```
+
+그리고 모든 작업을 마치면, 전체 파이버 트리를 DOM에 커밋한다.
+commitRoot 함수에서 이를 수행한다. 여기서는 모든 노드를 dom에 재귀적으로 추가한다.
+
+```javascript
+function commitRoot() {
+  // TODO add nodes to dom
+  commitWork(wipRoot.child);
+  wipRoot = null;
+}
+
+function commitWork(fiber) {
+  if (!fiber) {
+    return;
+  }
+
+  const domParent = fiber.parent.dom;
+  domParent.appendChild(fiber.dom);
+  commitWork(fiber.child);
+  commitWork(fiber.sibling);
+}
+
+...
+
+function workLoop(deadline) {
+  let shouldYield = false
+  while (nextUnitOfWork && !shouldYield) {
+    nextUnitOfWork = performUnitOfWork(
+      nextUnitOfWork
+    )
+    shouldYield = deadline.timeRemaining() < 1
+  }
+​
+  if (!nextUnitOfWork && wipRoot) {
+    commitRoot()
+  }
+​
+  requestIdleCallback(workLoop)
+}
+​
+```
