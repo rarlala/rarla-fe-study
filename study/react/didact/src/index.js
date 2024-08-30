@@ -33,9 +33,24 @@ function render(element, container) {
       dom[name] = element.props[name];
     });
 
-  element.props.children.forEach((child) => render(child, dom));
-
   container.appendChild(dom);
+}
+
+let nextUntilOfWork = null;
+
+function workLoop(deadline) {
+  let shouldYield = false;
+  while (nextUntilOfWork && !shouldYield) {
+    nextUntilOfWork = performUnitOfWork(nextUntilOfWork);
+    shouldYield = deadline.timeRemaining() < 1;
+  }
+  requestIdleCallback(workLoop);
+}
+
+requestIdleCallback(workLoop);
+
+function performUnitOfWork(nextUntilOfWork) {
+  // TODO
 }
 
 const Didact = {
