@@ -1182,3 +1182,145 @@ function commitDeletion(fiber, domParent) {
   }
 }
 ```
+
+## STEP 8
+
+### Hooks
+
+이제 function components가 있으므로 state도 추가해보자
+
+```javascript
+const Didact = {
+  createElement,
+  render,
+  useState,
+};
+
+/** @jsx Didact.createElement */
+function Counter() {
+  const [state, setState] = Didact.useState(1);
+  return <h1 onClick={() => setState((c) => c + 1)}>Count: {state}</h1>;
+}
+const element = <Counter />;
+const container = document.getElementById("root");
+```
+
+예제를 클릭할 때마다 상태가 1씩 증가하는 카운터 구성 요소로 변경해보자.
+카운터 값을 가져오고 업데이트하기 위해 Didact.useState를 사용하고 있다.
+
+useState 함수 내에서 사용할 수 있도록 function component를 호출하기 전 일부 전역 변수를 초기화해야 한다.
+
+먼저 진행중인 fiber를 설정한다.
+
+```javascript
+let wipFiber = null
+let hookIndex = null
+​
+function updateFunctionComponent(fiber) {
+  wipFiber = fiber
+  hookIndex = 0
+  wipFiber.hooks = []
+  const children = [fiber.type(fiber.props)]
+  reconcileChildren(fiber, children)
+}
+
+function useState(initial) {
+  // TODO
+}
+```
+
+또한 동일한 component에서 useState를 여러번 호출하는 것을 지원하기 위해 fiber에 hooks 배열을 추가한다. 그리고 현재 hooks 인덱스를 추적한다.
+
+```javascript
+function useState(initial) {
+  const oldHook =
+    wipFiber.alternate &&
+    wipFiber.alternate.hooks &&
+    wipFiber.alternate.hooks[hookIndex]
+  const hook = {
+    state: oldHook ? oldHook.state : initial,
+  }
+​
+  wipFiber.hooks.push(hook)
+  hookIndex++
+  return [hook.state]
+}
+```
+
+function component가 useState를 호출하면 이전 hooks이 있는지 확인한다.
+hook 인덱스를 사용해 fiber의 대체를 확인한다.
+
+이전 hook이 있다면, 이전 hook에서 새 hook으로 상태를 복사하고 그렇지 않으면 상태를 초기화한다.
+
+그런 다음 fiber에 새 hook을 추가하고 hook 인덱스를 1 증가시킨 후 다음 state를 반환한다.
+
+```javascript
+function useState(initial) {
+  const oldHook =
+    wipFiber.alternate &&
+    wipFiber.alternate.hooks &&
+    wipFiber.alternate.hooks[hookIndex];
+
+  const hook = {
+    state: oldHook ? oldHook.state : initial,
+    queue: [],
+  };
+
+  const setState = (action) => {
+    hook.queue.push(action);
+    wipRoot = {
+      dom: currentRoot.dom,
+      props: currentRoot.props,
+      alternate: currentRoot,
+    };
+    nextUntilOfWork = wipRoot;
+    deletions = [];
+  };
+
+  wipFiber.hooks.push(hook);
+  hookIndex++;
+  return [hook.state, setState];
+}
+```
+
+useState는 state를 업데이트 하는 함수도 반환해야 하므로 작업을 수행하는 setState 함수를 정의한다.
+우리는 hook에 추가한 대기열에 해당 작업을 push 한다.
+그런 다음 렌더링 함수에서 수행한 것과 유사한 작업을 수행하고 work loop가 새 렌더링 단계를 시작할 수 있도록 진행중인 새 작업 류트를 다음 작업 단위로 설정한다.
+
+하지만 아직 작업을 실행하지 않았다.
+
+```javascript
+const actions = oldHook ? oldHook.queue : [];
+actions.forEach((action) => {
+  hook.state = action(hook.state);
+});
+```
+
+다음 컴포넌트를 렌더링할 때 이 작업을 수행한다. 이전 hook 대기열에서 모든 작업을 가져온 다음 새 훅 state에 하나씩 적용하므로 상태를 반환하면 업데이트 된다.
+
+완성된 코드는 [codesandbox](https://codesandbox.io/s/didact-8-21ost)에서도 확인할 수 있다.
+
+## Epilogue
+
+-> 이 게시물의 목표 중 하나는 React의 작동 방식을 이해하는데 도움을 주는 것 외에도 React 코드베이스에 대해 더 쉽게 알아볼 수 있도록 하는 것이다. 이것이 바로 우리가 거의 모든 곳에서 동일한 변수와 함수 이름을 사용한 이유다.
+
+예를 들어 실제 React 앱의 function components 중 하나에 중단점을 추가하면 call stack에 다음이 표시된다.
+
+- workLoop
+- performUnitOfWork
+- updateFunctionComponent
+
+우리는 React 기능과 최적화를 많이 포함하지 않았다. 예를들어, React가 다르게 수행하는 몇가지 작업은 다음과 같다.
+
+- Didact에서는 렌더링 단계에서 전체 트리를 탐색한다. 대신 React는 몇가지 힌트와 경험적 방법을 따라 아무것도 변경되지 않은 전체 하위 트리를 건너뛴다.
+- 또한 커밋 단계에서도 전체 트리를 탐색하고 있다. React는 effect가 있는 fiber만으로 연결된 목록을 유지하고 해당 fiber만 방문한다.
+- 새로운 진행 중인 작업 트리를 구축할 때마다 각 fiber에 대해 새로운 객체를 생성한다. React는 이전 tree의 fiber를 재활용한다.
+- Didact는 렌더링 단계에서 새로운 업데이트를 받으면 진행 중인 작업 트리를 버리고 루트에서 다시 시작한다. React는 각 업데이트에 만료 타임스탬프를 태그하고 이를 사용해 어떤 업데이트의 우선순위가 더 높은지 결정한다.
+- 그밖에도 많다.
+
+쉽게 추가할 수 있는 몇가지 기능도 있다.
+
+- style prop에 object 사용
+- [하위 배열 편평화](https://github.com/pomber/didact/issues/11)
+- useEffect hook
+- reconciliation by key
