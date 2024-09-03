@@ -1031,3 +1031,154 @@ function updateDom(dom, prevProps, nextProps) {
     });
 }
 ```
+
+## STEP 7
+
+### Function Components
+
+다음으로 추가해야 할 것은 function components에 대한 지원이다.
+h1 element를 반환하는 간단한 function component를 사용해겠다.
+
+```javascript
+function App(props) {
+  return <h1>Hi {props.name}</h1>;
+}
+const element = <App name="foo" />;
+const container = document.getElementById("root");
+Didact.render(element, container);
+```
+
+jsx를 js로 변환하면 다음과 같습니다.
+
+```javascript
+function App(props) {
+  return Didact.createElement("h1", null, "Hi ", props.name);
+}
+const element = Didact.createElement(App, { name: "foo" });
+```
+
+function component는 2가지 측면에서 다르다.
+
+- function component의 fiber에는 dom 노드가 없다.
+- children은 props에서 직접 가져오는 대신 함수를 실행해 나온다.
+
+```javascript
+function performUnitOfWork(fiber) {
+  const isFunctionComponent = fiber.type instanceof Function;
+  if (isFunctionComponent) {
+    updateFunctionComponent(fiber);
+  } else {
+    updateHostComponent(fiber);
+  }
+
+  // 1. add dom node
+  if (!fiber.dom) {
+    fiber.dom = createDom(fiber);
+  }
+
+  // 2. create new fibers
+  const elements = fiber.props.children;
+  reconcileChildren(fiber, elements);
+
+  // 3. return next unit of work
+  if (fiber.child) {
+    return fiber.child;
+  }
+  let nextFiber = fiber;
+  while (nextFiber) {
+    if (nextFiber.sibling) {
+      return nextFiber.sibling;
+    }
+    nextFiber = nextFiber.parent;
+  }
+}
+
+function updateFunctionComponent(fiber) {
+  // TODO
+}
+
+function updateHostComponent(fiber) {
+  if (!fiber.dom) {
+    fiber.dom = createDom(fiber);
+  }
+  reconcileChildren(fiber, fiber.props.children);
+}
+```
+
+fiber type이 function인지 확인하고 이에 따른 다른 업데이트 함수로 이동한다.
+updateHostComponent에서는 이전과 동일한 작업을 수행한다.
+
+```javascript
+function updateFunctionComponent(fiber) {
+  const children = [fiber.type(fiber.props)];
+  reconcileChildren(fiber, children);
+}
+```
+
+updateFunctionComponent에서 children을 가져오는 함수를 실행한다.
+예를 들어, 여기에서 Fiber.type은 App 함수이고 이를 실행하면 h1 요소를 반환한다.
+
+그 다음 children이 있으면 조정이 동일한 방식으로 작동하므로 아무것도 변경할 필요가 없다.
+
+변경해야할 것은 commitWork 함수다
+이제 DOM 노드가 없는 fiber가 있으므로 2가지를 변경해야한다.
+
+```javascript
+function commitWork(fiber) {
+  if (!fiber) {
+    return;
+  }
+
+  let domParentFiber = fiber.parent;
+  while (!domParentFiber.dom) {
+    domParentFiber = domParentFiber.parent;
+  }
+
+  const domParent = domParentFiber.dom;
+
+  if (fiber.effectTag === "PLACEMENT" && fiber.dom != null) {
+    domParent.appendChild(fiber.dom);
+  } else if (fiber.effectTag === "UPDATE" && fiber.dom != null) {
+    updateDom(fiber.dom, fiber.alternate.props, fiber.props);
+  } else if (fiber.effectTag === "DELETION") {
+    domParent.removeChild(fiber.dom);
+  }
+  commitWork(fiber.child);
+  commitWork(fiber.sibling);
+}
+```
+
+그리고 노드를 제거할 때 DOM 노드가 있는 하위 항목을 찾을 때까지 계속 진행해야한다.
+
+```javascript
+function commitWork(fiber) {
+  if (!fiber) {
+    return;
+  }
+
+  let domParentFiber = fiber.parent;
+  while (!domParentFiber.dom) {
+    domParentFiber = domParentFiber.parent;
+  }
+
+  const domParent = domParentFiber.dom;
+
+  if (fiber.effectTag === "PLACEMENT" && fiber.dom != null) {
+    domParent.appendChild(fiber.dom);
+  } else if (fiber.effectTag === "UPDATE" && fiber.dom != null) {
+    updateDom(fiber.dom, fiber.alternate.props, fiber.props);
+  } else if (fiber.effectTag === "DELETION") {
+    commitDeletion(fiber, domParent);
+  }
+  commitWork(fiber.child);
+  commitWork(fiber.sibling);
+}
+
+function commitDeletion(fiber, domParent) {
+  if (fiber.dom) {
+    domParent.removeChild(fiber.dom);
+  } else {
+    commitDeletion(fiber.child, domParent);
+  }
+}
+```
