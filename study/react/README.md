@@ -604,23 +604,19 @@ function render(element, container) {
 
 그 다음 브라우저가 준비되면 workLoop를 호출하고 root에서 작업을 시작한다.
 
-```javascript
+1. 먼저 새 노드를 생성하고 이를 DOM 노드에 추가한다.
+   우리는 fiber.dom 속성에서 DOM 노드를 추적한다.
 
-```
-
-먼저 새 노드를 생성하고 이를 DOM 노드에 추가한다.
-우리는 Fiber.dom 속성에서 DOM 노드를 추적한다.
-
-그 다음 각 children마다 새로운 fiber를 만든다.
+2. 그 다음 각 children마다 새로운 fiber를 만든다.
 
 그리고 첫 번째 child인지 아닌지에 따라 child 또는 sibling으로 설정해 fiber 트리에 추가한다.
 
-마지막으로 다음 작업 단위를 검색한다.
-먼저 child를 시도하고, 다음에는 sibling, 다음에는 uncle과 시도한다.
+3. 마지막으로 다음 작업 단위를 검색한다.
+   먼저 child를 시도하고, 다음에는 sibling, 다음에는 uncle과 시도한다.
 
 ```javascript
 function performUnitOfWork(fiber) {
-  // TODO add dom node
+  // 1. add dom node
   if (!fiber.dom) {
     fiber.dom = createDom(fiber);
   }
@@ -628,7 +624,7 @@ function performUnitOfWork(fiber) {
   if (fiber.parent) {
     fiber.parent.dom.appendChild(fiber.dom);
   }
-  // TODO create new fibers
+  // 2. create new fibers
   const elements = fiber.props.children;
   let index = 0;
   let prevSibling = null;
@@ -653,7 +649,7 @@ function performUnitOfWork(fiber) {
     index++;
   }
 
-  // TODO return next unit of work
+  // 3. return next unit of work
   if (fiber.child) {
     return fiber.child;
   }
@@ -742,4 +738,296 @@ function workLoop(deadline) {
   requestIdleCallback(workLoop)
 }
 ​
+```
+
+## STEP 6
+
+### Reconciliation
+
+Reconciliation이란 재조정으로 컴포넌트 업데이트를 예측하는 비교(diffing) 알고리즘에 대해 알아보자. [리액트 공식 문서 참고](https://reactjs-kr.firebaseapp.com/docs/reconciliation.html)
+
+지금까지는 DOM에만 항목을 추가했지만, 노드를 업데이트하거나 삭제하는 것은 어떻게 할까? 이 부분에 대해 알아보자. 렌더링 함수에서 받은 요소를 DOM에 커밋한 마지막 파이버 트리와 비교해야한다.
+
+비교를 위해 커밋을 마친 후에 DOM에 커밋한 마지막 파이버 트리에 대한 참조를 저장해야하는데,
+currentRoot라는 변수명에 저장했다.
+
+```javascript
+function commitRoot() {
+  commitWork(wipRoot.child)
+  **currentRoot = wipRoot**
+  wipRoot = null
+}
+​
+function commitWork(fiber) {
+  if (!fiber) {
+    return
+  }
+  const domParent = fiber.parent.dom
+  domParent.appendChild(fiber.dom)
+  commitWork(fiber.child)
+  commitWork(fiber.sibling)
+}
+​
+function render(element, container) {
+  wipRoot = {
+    dom: container,
+    props: {
+      children: [element],
+    },
+    **alternate: currentRoot,**
+  }
+  nextUnitOfWork = wipRoot
+}
+​
+let nextUnitOfWork = null
+let currentRoot = null
+**let wipRoot = null**
+```
+
+위 코드에서 보면 모든 fiber에 alternate 프로퍼티를 추가했다.
+alternate 프로퍼티는 이전 커밋 단계에서 DOM에 커밋한 파이버 이전 파이버에 대한 링크를 의미한다.
+
+이제 새로운 Fiber를 생성하는 performUnitOfWork 함수에서 2. create new fibers에 해당하는 부분을 reconcileChildren() 함수로 빼서 작업해보겠습니다.
+
+```javascript
+function performUnitOfWork(fiber) {
+  // 1. add dom node
+  if (!fiber.dom) {
+    fiber.dom = createDom(fiber);
+  }
+
+  // 2. create new fibers
+  const elements = fiber.props.children;
+  reconcileChildren(fiber, elements);
+
+  // 3. return next unit of work
+  if (fiber.child) {
+    return fiber.child;
+  }
+  let nextFiber = fiber;
+  while (nextFiber) {
+    if (nextFiber.sibling) {
+      return nextFiber.sibling;
+    }
+    nextFiber = nextFiber.parent;
+  }
+}
+
+function reconcileChildren(wipFiber, elements) {
+  let index = 0;
+  let prevSibling = null;
+
+  while (index < elements.length) {
+    const element = elements[index];
+
+    const newFiber = {
+      type: element.type,
+      props: element.props,
+      parent: wipFiber,
+      dom: null,
+    };
+
+    if (index === 0) {
+      wipFiber.child = newFiber;
+    } else if (element) {
+      prevSibling.sibling = newFiber;
+    }
+
+    prevSibling = newFiber;
+    index++;
+  }
+}
+```
+
+이 함수에서 오래된 fiber를 새로운 elements와 조정 시킬 것이다.
+이전 fiber의 children과 조정하려는 elements 배열을 동시에 반복한다.
+
+배열과 linked list를 동시에 반복하는데 필요한 모든 boilerplate를 무시하면 이 while 문에서 가장 중요한 oldFiber와 element가 남는다. element는 우리가 DOM에 렌더링하려는 항목이고, oldFiber는 마지막으로 렌더링한 항목이다.
+DOM에 적용할 사항이 있는지 확인하려면 이를 비교해야한다.
+
+그럼 어떻게 비교할까?
+
+- 이전 Fiber와 새 요소의 유형이 동일한 경우 DOM 노드를 유지하고 새 prop으로 업데이트함
+- 유형이 다르고 새 요소가 있으면 새 DOM 노드를 만들어야 함
+- 유형이 다르고 오래된 Fiber가 있는 경우 기존 노드를 제거
+
+여기서 React는 더 나은 조정을 위해 key를 사용한다. 예를 들어, 요소 배열에서 자식이 위치를 변경하는 경우를 감지합니다.
+
+이전 파이버와 요소의 유형이 동일한 경우 이전 파이버의 DOM 노드와 요소의 소품을 유지하는 새 파이버를 만든다.
+또한 fiber에 effectTag라는 새로운 속성을 추가합니다. 나중에 커밋 단계에서 이 속성을 사용한다.
+
+```javascript
+if (sameType) {
+  // update the node
+  newFiber = {
+    type: oldFiber.type,
+    props: element.props,
+    dom: oldFiber.dom,
+    parent: wipFiber,
+    alternate: oldFiber,
+    effectTag: "UPDATE",
+  };
+}
+```
+
+그다음 요소에 새 DOM 노드가 필요한 경우 PLACEMENT 효과 태그로 새 fiber에 태그를 지정한다.
+
+```javascript
+if (element && !sameType) {
+  // add this node
+  newFiber = {
+    type: element.type,
+    props: element.props,
+    dom: null,
+    parent: wipFiber,
+    alternate: null,
+    effectTag: "PLACEMENT",
+  };
+}
+```
+
+그리고 노드를 삭제해야 하는 경우, 새 Fiber가 없으므로 이전 Fiber에 효과 태그를 추가합니다.
+하지만 파이버 트리를 DOM에 커밋할 때 이전 파이버가 없는 작업 진행 중인 루트에서 수행합니다.
+
+```javascript
+if (oldFiber && !sameType) {
+  oldFiber.effectTag = "DELETION";
+  deletions.push(oldFiber);
+}
+```
+
+따라서 제거하려는 노드를 추적하려면 배열이 필요하다.
+
+```javascript
+function render(element, container) {
+  wipRoot = {
+    dom: container,
+    props: {
+      children: [element],
+    },
+    alternate: currentRoot,
+  };
+  deletions = [];
+  nextUntilOfWork = wipRoot;
+}
+
+let nextUntilOfWork = null;
+let wipRoot = null;
+let currentRoot = null;
+let deletions = null;
+```
+
+그런 다음 DOM에 변경 사항을 적용할 때 해당 배열의 파이버도 사용한다.
+
+```javascript
+function commitRoot() {
+  deletions.forEach(commitWork);
+  // add nodes to dom
+  commitWork(wipRoot.child);
+  currentRoot = wipRoot;
+  wipRoot = null;
+}
+```
+
+이제 새로운 effectTags를 처리하도록 commitWork 함수를 변경해보자
+
+fiber에 effectTag가 PLACEMENT인 경우
+이전과 동일한 작업을 수행하고 상위 Fiber의 노드에 DOM 노드를 추가한다.
+
+```javascript
+function commitWork(fiber) {
+  if (!fiber) {
+    return;
+  }
+
+  const domParent = fiber.parent.dom;
+
+  **if (fiber.effectTag === "PLACEMENT" && fiber.dom != null) {
+    domParent.appendChild(fiber.dom);
+  }**
+  commitWork(fiber.child);
+  commitWork(fiber.sibling);
+}
+```
+
+fiber에 effectTag가 DELETION인 경우
+반대로 자식을 제거한다.
+
+```javascript
+else if (fiber.effectTag === "DELETION") {
+  domParent.removeChild(fiber.dom);
+}
+```
+
+fiber에 effectTag가 UPDATE인 경우
+변경된 props로 기존 DOM 노드를 업데이트 한다.
+
+```javascript
+function updateDom(dom, prevProps, nextProps) {
+  //
+}
+...
+else if (fiber.effectTag === "UPDATE" && fiber.dom != null) {
+  updateDom(fiber.dom, fiber.alternate.props, fiber.props);
+}
+```
+
+기존 Fiber의 props와 새 Fiber의 props를 비교하여 없어진 props는 제거하고, 새로 추가되거나 변경된 props는 세팅한다.
+
+```javascript
+const isProperty = (key) => key !== "children";
+const isNew = (prev, next) => (key) => prev[key] !== next[key];
+const isGone = (prev, next) => (key) => !(key in next);
+function updateDom(dom, prevProps, nextProps) {
+  // Remove old properties
+  Object.keys(prevProps)
+    .filter(isProperty)
+    .filter(isGone(prevProps, nextProps))
+    .forEach((name) => {
+      dom[name] = "";
+    });
+
+  // Set new or changed properties
+  Object.keys(nextProps)
+    .filter(isProperty)
+    .filter(isNew(prevProps, nextProps))
+    .forEach((name) => {
+      dom[name] = nextProps[name];
+    });
+}
+```
+
+업데이트해야하는 특별한 종류의 prop 중 하나는 이벤트 리스너다.
+prop 이름이 'on' 접두사로 시작하는 경우 이를 다르게 처리한다.
+
+```javascript
+const isEvent = (key) => key.startsWith("on");
+const isProperty = (key) => key !== "children" && !isEvent(key);
+```
+
+이벤트 핸들러가 변경되면 노드에서 이를 제거한다.
+그리고 새로운 이벤트 핸들러를 추가한다.
+
+```javascript
+function updateDom(dom, prevProps, nextProps) {
+  // Remove old or changed event listeners
+  Object.keys(prevProps)
+    .filter(isEvent)
+    .filter((key) => !(key in nextProps) || isNew(prevProps, nextProps)(key))
+    .forEach((name) => {
+      const eventType = name.toLowerCase().substring(2);
+      dom.removeEventListener(eventType, prevProps[name]);
+    });
+
+  //...
+
+  // Add event listeners
+  Object.keys(nextProps)
+    .filter(isEvent)
+    .filter(isNew(prevProps, nextProps))
+    .forEach((name) => {
+      const eventType = name.toLowerCase().substring(2);
+      dom.addEventListener(eventType, nextProps[name]);
+    });
+}
 ```
