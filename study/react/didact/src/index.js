@@ -206,6 +206,35 @@ function useState(initial) {
   return [hook.state, setState];
 }
 
+function dependenciesAreEqual(prevDependencies, nextDependencies) {
+  return (
+    prevDependencies.length === nextDependencies.length &&
+    prevDependencies.every((dep, i) => Object.is(dep, nextDependencies[i]))
+  );
+}
+
+function useMemo(calculateValue, dependencies) {
+  const oldHook =
+    wipFiber.alternate &&
+    wipFiber.alternate.hooks &&
+    wipFiber.alternate.hooks[hookIndex];
+
+  const hook = {
+    dependencies,
+    value: oldHook ? oldHook.value : calculateValue(),
+  };
+
+  if (oldHook && dependenciesAreEqual(oldHook.dependencies, dependencies)) {
+    hook.value = oldHook.value;
+  } else {
+    hook.value = calculateValue();
+  }
+
+  wipFiber.hooks.push(hook);
+  hookIndex++;
+  return hook.value;
+}
+
 function updateHostComponent(fiber) {
   if (!fiber.dom) {
     fiber.dom = createDom(fiber);
@@ -270,7 +299,7 @@ function reconcileChildren(wipFiber, elements) {
 }
 
 function propsAreEqual(prevProps, nextProps) {
-  return Object.key(nextProps).every((key) =>
+  return Object.keys(nextProps).every((key) =>
     Object.is(prevProps[key], nextProps[key])
   );
 }
@@ -295,19 +324,32 @@ const Didact = {
   render,
   useState,
   memo,
+  useMemo,
 };
 
 /** @jsx Didact.createElement */
 function Parent() {
   const [count, setCount] = Didact.useState(1);
+  const [count2, setCount2] = Didact.useState(1);
+
+  const memoizedValue = Didact.useMemo(() => {
+    console.log("expensive calculation start");
+    const startTime = Date.now();
+    while (Date.now() - startTime < 2000) {}
+    console.log("expensive calculation end");
+    return count;
+  }, [count]);
+
   return (
-    <div style={{ display: "flex" }}>
-      <button type="button" onClick={() => setCount((c) => c - 1)}>
-        -
-      </button>
-      <Child count={count} />
+    <div>
+      <Child count={memoizedValue} />
       <button type="button" onClick={() => setCount((c) => c + 1)}>
-        +
+        + count
+      </button>
+
+      <h1>Count2: {count2}</h1>
+      <button type="button" onClick={() => setCount2((c) => c + 1)}>
+        + count2
       </button>
     </div>
   );
