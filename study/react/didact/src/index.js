@@ -22,7 +22,7 @@ function createTextElement(text) {
 
 function createDom(fiber) {
   const dom =
-    fiber.type == "TEXT_ELEMENT"
+    fiber.type === "TEXT_ELEMENT"
       ? document.createTextNode("")
       : document.createElement(fiber.type);
 
@@ -269,17 +269,54 @@ function reconcileChildren(wipFiber, elements) {
   }
 }
 
+function propsAreEqual(prevProps, nextProps) {
+  return Object.key(nextProps).every((key) =>
+    Object.is(prevProps[key], nextProps[key])
+  );
+}
+
+function memo(component, areEqual = propsAreEqual) {
+  let prevProps = null;
+  let lastRenderedOutput = null;
+
+  return function MemoizedComponent(nextProps) {
+    if (prevProps && areEqual(prevProps, nextProps)) {
+      return lastRenderedOutput;
+    } else {
+      prevProps = nextProps;
+      lastRenderedOutput = component(nextProps);
+      return lastRenderedOutput;
+    }
+  };
+}
+
 const Didact = {
   createElement,
   render,
   useState,
+  memo,
 };
 
 /** @jsx Didact.createElement */
-function Counter() {
-  const [state, setState] = Didact.useState(1);
-  return <h1 onClick={() => setState((c) => c + 1)}>Count: {state}</h1>;
+function Parent() {
+  const [count, setCount] = Didact.useState(1);
+  return (
+    <div style={{ display: "flex" }}>
+      <button type="button" onClick={() => setCount((c) => c - 1)}>
+        -
+      </button>
+      <Child count={count} />
+      <button type="button" onClick={() => setCount((c) => c + 1)}>
+        +
+      </button>
+    </div>
+  );
 }
+
+const Child = Didact.memo(function Child({ count }) {
+  return <h1>Count: {count}</h1>;
+});
+
 const container = document.getElementById("root");
-const element = <Counter />;
+const element = <Parent />;
 Didact.render(element, container);
