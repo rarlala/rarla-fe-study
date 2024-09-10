@@ -22,7 +22,7 @@ function createTextElement(text) {
 
 function createDom(fiber) {
   const dom =
-    fiber.type == "TEXT_ELEMENT"
+    fiber.type === "TEXT_ELEMENT"
       ? document.createTextNode("")
       : document.createElement(fiber.type);
 
@@ -206,6 +206,35 @@ function useState(initial) {
   return [hook.state, setState];
 }
 
+function dependenciesAreEqual(prevDependencies, nextDependencies) {
+  return (
+    prevDependencies.length === nextDependencies.length &&
+    prevDependencies.every((dep, i) => Object.is(dep, nextDependencies[i]))
+  );
+}
+
+function useMemo(calculateValue, dependencies) {
+  const oldHook =
+    wipFiber.alternate &&
+    wipFiber.alternate.hooks &&
+    wipFiber.alternate.hooks[hookIndex];
+
+  const hook = {
+    dependencies,
+    value: oldHook ? oldHook.value : calculateValue(),
+  };
+
+  if (oldHook && dependenciesAreEqual(oldHook.dependencies, dependencies)) {
+    hook.value = oldHook.value;
+  } else {
+    hook.value = calculateValue();
+  }
+
+  wipFiber.hooks.push(hook);
+  hookIndex++;
+  return hook.value;
+}
+
 function updateHostComponent(fiber) {
   if (!fiber.dom) {
     fiber.dom = createDom(fiber);
@@ -269,17 +298,67 @@ function reconcileChildren(wipFiber, elements) {
   }
 }
 
+function propsAreEqual(prevProps, nextProps) {
+  return Object.keys(nextProps).every((key) =>
+    Object.is(prevProps[key], nextProps[key])
+  );
+}
+
+function memo(component, areEqual = propsAreEqual) {
+  let prevProps = null;
+  let lastRenderedOutput = null;
+
+  return function MemoizedComponent(nextProps) {
+    if (prevProps && areEqual(prevProps, nextProps)) {
+      return lastRenderedOutput;
+    } else {
+      prevProps = nextProps;
+      lastRenderedOutput = component(nextProps);
+      return lastRenderedOutput;
+    }
+  };
+}
+
 const Didact = {
   createElement,
   render,
   useState,
+  memo,
+  useMemo,
 };
 
 /** @jsx Didact.createElement */
-function Counter() {
-  const [state, setState] = Didact.useState(1);
-  return <h1 onClick={() => setState((c) => c + 1)}>Count: {state}</h1>;
+function Parent() {
+  const [count, setCount] = Didact.useState(1);
+  const [count2, setCount2] = Didact.useState(1);
+
+  const memoizedValue = Didact.useMemo(() => {
+    console.log("expensive calculation start");
+    const startTime = Date.now();
+    while (Date.now() - startTime < 2000) {}
+    console.log("expensive calculation end");
+    return count;
+  }, [count]);
+
+  return (
+    <div>
+      <Child count={memoizedValue} />
+      <button type="button" onClick={() => setCount((c) => c + 1)}>
+        + count
+      </button>
+
+      <h1>Count2: {count2}</h1>
+      <button type="button" onClick={() => setCount2((c) => c + 1)}>
+        + count2
+      </button>
+    </div>
+  );
 }
+
+const Child = Didact.memo(function Child({ count }) {
+  return <h1>Count: {count}</h1>;
+});
+
 const container = document.getElementById("root");
-const element = <Counter />;
+const element = <Parent />;
 Didact.render(element, container);
